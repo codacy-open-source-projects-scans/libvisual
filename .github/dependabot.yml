@@ -1,0 +1,25 @@
+version: 2
+updates:
+
+  - package-ecosystem: "github-actions"
+    commit-message:
+      include: "scope"
+      prefix: "Actions"
+    directory: "/"
+    labels:
+      - "enhancement"
+      - "porting: done"
+    schedule:
+      interval: "weekly"
+
+  - package-ecosystem: "github-actions"
+    target-branch: "0.4.x"
+    commit-message:
+      include: "scope"
+      prefix: "[0.4.x] Actions"
+    directory: "/"
+    labels:
+      - "enhancement"
+      - "porting: done"
+    schedule:
+      interval: "weekly"

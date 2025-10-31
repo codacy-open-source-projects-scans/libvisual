@@ -1,0 +1,395 @@
+CMAKE_MINIMUM_REQUIRED(VERSION 3.20 FATAL_ERROR)
+
+SET(CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
+
+PROJECT(libvisual
+  VERSION 0.5.0
+  DESCRIPTION "Libvisual is an audio visualization framework."
+  HOMEPAGE_URL "http://libvisual.org"
+  LANGUAGES C CXX)
+
+# Version numbers
+SET(LV_VERSION_MAJOR  "${PROJECT_VERSION_MAJOR}")
+SET(LV_VERSION_MINOR  "${PROJECT_VERSION_MINOR}")
+SET(LV_VERSION_MICRO  "${PROJECT_VERSION_PATCH}")
+SET(LV_VERSION        "${PROJECT_VERSION}")
+SET(LV_VERSION_SUFFIX "${LV_VERSION_MAJOR}.${LV_VERSION_MINOR}")
+
+# Package information
+SET(PACKAGE             "libvisual")
+SET(PACKAGE_VERSION     "${LV_VERSION}")
+SET(PACKAGE_BUGREPORT   "http://github.com/Libvisual/libvisual/issues")
+SET(PACKAGE_NAME        "${PACKAGE}")
+SET(PACKAGE_STRING      "${PACKAGE}-${PACKAGE_VERSION}")
+SET(PACKAGE_VENDOR      "Libvisual team")
+SET(PACKAGE_URL         "${PROJECT_HOMEPAGE_URL}")
+SET(PACKAGE_CONTACT     "${PROJECT_HOMEPAGE_URL}")
+SET(PACKAGE_SUMMARY     "${PROJECT_DESCRIPTION}")
+
+# Installation Paths
+INCLUDE(GNUInstallDirs)
+SET(LV_INCLUDE_DIR       "${CMAKE_INSTALL_INCLUDEDIR}/libvisual-${LV_VERSION_SUFFIX}")
+SET(LV_INCLUDE_FULL_DIR  "${CMAKE_INSTALL_FULL_INCLUDEDIR}/libvisual-${LV_VERSION_SUFFIX}")
+SET(LV_PLUGIN_DIR        "${CMAKE_INSTALL_LIBDIR}/libvisual-${LV_VERSION_SUFFIX}")
+SET(LV_PLUGIN_FULL_DIR   "${CMAKE_INSTALL_FULL_LIBDIR}/libvisual-${LV_VERSION_SUFFIX}")
+SET(LV_PLUGIN_DATA_DIR   "${CMAKE_INSTALL_DATADIR}/libvisual-${LV_VERSION_SUFFIX}")
+SET(LV_PLUGIN_LOCALE_DIR "${CMAKE_INSTALL_LOCALEDIR}")
+SET(LV_CMAKE_EXPORT_DIR  "${CMAKE_INSTALL_LIBDIR}/cmake/libvisual-${LV_VERSION_SUFFIX}")
+
+# Include basic CMake modules
+INCLUDE(CheckFunctionExists)
+INCLUDE(CheckIncludeFile)
+INCLUDE(CheckIncludeFiles)
+INCLUDE(CheckLibraryExists)
+INCLUDE(CheckTypeSize)
+FIND_PACKAGE(PkgConfig REQUIRED)
+
+INCLUDE(LVCheckTargetEnv)
+
+# Set C/C++ standards
+SET(CMAKE_C_STANDARD 11)
+SET(CMAKE_C_STANDARD_REQUIRED on)
+SET(CMAKE_C_EXTENSIONS off)
+SET(CMAKE_CXX_STANDARD 20)
+SET(CMAKE_CXX_STANDARD_REQUIRED on)
+SET(CMAKE_CXX_EXTENSIONS off)
+
+# MSVC needs an additional flag to define the right values for __cplusplus.
+# CMake couldn't be bothered to do this automatically, so we'll do it ourselves.
+IF(MSVC)
+  ADD_COMPILE_OPTIONS(/Zc:__cplusplus)
+ENDIF()
+
+# Check for Unix specific functions
+# TODO: Generate error when a required header is missing
+CHECK_INCLUDE_FILE(unistd.h    HAVE_UNISTD_H)
+CHECK_INCLUDE_FILE(dlfcn.h     HAVE_DLFCN_H)
+CHECK_INCLUDE_FILE(dirent.h    HAVE_DIRENT_H)
+CHECK_FUNCTION_EXISTS(sysconf HAVE_SYSCONF)
+
+# Check threading implementation
+FIND_PACKAGE(Threads REQUIRED)
+
+# Check for dynamic linking library
+CHECK_LIBRARY_EXISTS(dl dlsym "" HAVE_DLFCN)
+IF(VISUAL_OS_POSIX AND NOT HAVE_DLFCN)
+  MESSAGE(FATAL_ERROR "Libvisual requires dlfcn to build")
+ENDIF()
+
+# Check for standard math library
+CHECK_LIBRARY_EXISTS(m sqrt "" HAVE_STDC_MATH)
+IF(NOT HAVE_STDC_MATH)
+  MESSAGE(FATAL_ERROR "Libvisual requires libm to build")
+ENDIF()
+
+# Check for Zlib
+FIND_PACKAGE(ZLIB 1.2 REQUIRED)
+
+# Check for libpng
+FIND_PACKAGE(PNG 1.4 REQUIRED)
+
+# Internationalization
+SET(GETTEXT_PACKAGE "libvisual-${LV_VERSION_SUFFIX}")
+OPTION(ENABLE_NLS "Enable internationalization" yes)
+IF(ENABLE_NLS)
+  FIND_PACKAGE(Gettext REQUIRED)
+  SET(HAVE_GETTEXT ${GETTEXT_FOUND})
+  IF(NOT HAVE_GETTEXT)
+    MESSAGE(FATAL_ERROR "Internationalization requires GNU Gettext to work")
+  ENDIF()
+  SET(LOCALE_DIR ${CMAKE_INSTALL_FULL_LOCALEDIR})
+  ADD_SUBDIRECTORY(po)
+ENDIF()
+
+# Check for type sizes
+CHECK_TYPE_SIZE(short  SIZEOF_SHORT)
+CHECK_TYPE_SIZE(int    SIZEOF_INT)
+CHECK_TYPE_SIZE(long   SIZEOF_LONG)
+CHECK_TYPE_SIZE("long long"   SIZEOF_LONG_LONG)
+CHECK_TYPE_SIZE(size_t SIZEOF_SIZE_T)
+
+# Try to figure out whether visual_size should be long or int
+MESSAGE(STATUS "Checking for the appropriate definition for size_t")
+IF(SIZEOF_SIZE_T EQUAL SIZEOF_SHORT)
+  SET(VISUAL_SIZE_TYPE short)
+  SET(VISUAL_SIZE_T_FORMAT "hu")
+ELSEIF(SIZEOF_SIZE_T EQUAL SIZEOF_INT)
+  SET(VISUAL_SIZE_TYPE int)
+  SET(VISUAL_SIZE_T_FORMAT "u")
+ELSEIF(SIZEOF_SIZE_T EQUAL SIZEOF_LONG)
+  SET(VISUAL_SIZE_TYPE long)
+  SET(VISUAL_SIZE_T_FORMAT "lu")
+ELSEIF(SIZEOF_SIZE_T EQUAL SIZEOF_LONG_LONG)
+  SET(VISUAL_SIZE_TYPE "long long")
+  IF(WIN32)
+    SET(VISUAL_SIZE_T_FORMAT "I64u")
+  ELSE()
+    SET(VISUAL_SIZE_T_FORMAT "llu")
+  ENDIF()
+ELSE()
+  MESSAGE(FATAL_ERROR "No type matching size_t in size")
+ENDIF()
+MESSAGE(STATUS "Size of size_t is ${VISUAL_SIZE_TYPE}")
+
+# Add RPATHs where necessary
+SET(CMAKE_SKIP_BUILD_RPATH FALSE)
+SET(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
+SET(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+LIST(FIND CMAKE_PLATFORM_IMPLICIT_LINK_DIRECTORIES "${CMAKE_INSTALL_FULL_LIBDIR}" IS_SYSTEM_DIR)
+IF(IS_SYSTEM_DIR STREQUAL "-1")
+  SET(CMAKE_INSTALL_RPATH "${CMAKE_INSTALL_FULL_LIBDIR}")
+ENDIF()
+
+# Resolve all external symbols when linking SOs.
+OPTION(ENABLE_SO_UNRESOLVED_SYMBOL_CHECKS "Enable resolution of external symbols when linking SOs" yes)
+
+# Compiler optimizations
+OPTION(ENABLE_EXTRA_OPTIMIZATIONS "Enable extra optimizations" no)
+IF(ENABLE_EXTRA_OPTIMIZATIONS)
+  ADD_COMPILE_OPTIONS(-O3 -fexpensive-optimizations)
+ELSEIF(CMAKE_BUILD_TYPE STREQUAL Debug)
+  ADD_COMPILE_OPTIONS(-O0)
+ENDIF()
+
+# Turn on as many compiler warnings as we can that is usable for development.
+ADD_COMPILE_OPTIONS(-Wall -Wextra -Wunused -fstrict-aliasing)
+
+# Profiling
+OPTION(ENABLE_PROFILING "Enable profiling" no)
+IF(ENABLE_PROFILING)
+  ADD_COMPILE_OPTIONS(-pg)
+ENDIF()
+
+# Fatal warnings
+OPTION(ENABLE_FATAL_WARNINGS "Compile with -Werror" no)
+IF(ENABLE_FATAL_WARNINGS)
+  ADD_COMPILE_OPTIONS(-Werror)
+ENDIF()
+
+# Build type specific compiler options
+# Debug
+IF(CMAKE_COMPILER_IS_GNUCXX)
+  ADD_COMPILE_OPTIONS(-ggdb3)
+ELSEIF(CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
+  ADD_COMPILE_OPTIONS(-g)
+ENDIF()
+
+# Miscellaneous optimizations
+OPTION(ENABLE_FAST_FP_RNG "Enable faster random floating point generator" ${ENABLE_EXTRA_OPTIMIZATIONS})
+SET(VISUAL_RANDOM_FAST_FP_RNG ${ENABLE_FAST_FP_RNG})
+
+# ORC
+FIND_PACKAGE(ORC REQUIRED)
+
+# Pedantic checks
+OPTION(ENABLE_PEDANTIC_CHECKS "Enable pedantic checks (program immediately aborts if errors occur)" no)
+IF(ENABLE_PEDANTIC_CHECKS)
+  ADD_COMPILE_DEFINITIONS(VISUAL_PEDANTIC_CHECKS)
+ENDIF()
+
+# Git revision
+FIND_PACKAGE(Git)
+IF(GIT_FOUND)
+  EXECUTE_PROCESS(COMMAND ${GIT_EXECUTABLE} describe --always
+    OUTPUT_VARIABLE LV_REVISION OUTPUT_STRIP_TRAILING_WHITESPACE
+    ERROR_QUIET)
+ENDIF()
+IF(NOT LV_REVISION)
+  SET(LV_REVISION "unknown")
+ENDIF()
+
+IF(EXISTS ${PROJECT_BINARY_DIR}/version.h)
+  FILE(STRINGS ${PROJECT_BINARY_DIR}/version.h OLD_REVISION REGEX "#define LV_REVISION")
+  STRING(REGEX MATCH \".*\" OLD_REVISION ${OLD_REVISION})
+  STRING(REGEX MATCH  "[^\"][0-9a-z]+" OLD_REVISION ${OLD_REVISION})
+ELSE()
+  SET(OLD_REVISION "")
+ENDIF()
+
+IF(NOT LV_REVISION STREQUAL OLD_REVISION)
+  MESSAGE(STATUS "Generating version.h")
+  CONFIGURE_FILE(
+    "${PROJECT_SOURCE_DIR}/version.h.in"
+    "${PROJECT_BINARY_DIR}/version.h"
+    @ONLY
+  )
+ENDIF()
+
+# Tools
+OPTION(ENABLE_TOOLS "Build Libvisual tools" yes)
+IF(ENABLE_TOOLS)
+  FIND_PACKAGE(SDL)
+  SET(HAVE_SDL ${SDL_FOUND})
+
+  FIND_PACKAGE(OpenGL)
+  SET(HAVE_GL ${OPENGL_FOUND})
+
+  # Give users heads up about needing SDL and OpenGL for visual display
+  IF(NOT HAVE_SDL)
+    MESSAGE(WARNING "SDL is required for lv-tool to support visual display")
+  ENDIF()
+  IF(NOT HAVE_GL)
+    MESSAGE(WARNING "OpenGL is required for lv-tool to support OpenGL visualisations")
+  ENDIF()
+
+  ADD_SUBDIRECTORY(tools/lv-tool)
+  ADD_SUBDIRECTORY(tools/benchmarks)
+ENDIF()
+
+# Tests
+OPTION(ENABLE_TESTS "Build tests" no)
+IF(ENABLE_TESTS)
+  ADD_COMPILE_DEFINITIONS(LV_ENABLE_TESTS)
+
+  ENABLE_TESTING()
+  ADD_SUBDIRECTORY(tests)
+ENDIF()
+
+# Examples
+OPTION(ENABLE_EXAMPLES "Build examples" yes)
+IF(ENABLE_EXAMPLES)
+  ADD_SUBDIRECTORY(examples)
+ENDIF()
+
+# API Documentation via Doxygen
+OPTION(ENABLE_DOCS "Enable the creation of API documentation" no)
+IF(ENABLE_DOCS)
+  FIND_PACKAGE(Doxygen REQUIRED)
+  IF(NOT DOXYGEN_DOT_FOUND)
+    MESSAGE(WARNING "Graphviz Dot tool not found. API documentation will not have diagrams")
+  ENDIF()
+
+  SET(DOXYGEN_BUILTIN_STL_SUPPORT YES)
+  SET(DOXYGEN_EXPAND_ONLY_PREDEF YES)
+  SET(DOXYGEN_EXTRACT_LOCAL_CLASSES NO)
+  SET(DOXYGEN_EXCLUDE libvisual/private)
+  SET(DOXYGEN_EXCLUDE_SYMBOLS Impl)
+  SET(DOXYGEN_FULL_PATH_NAMES NO)
+  SET(DOXYGEN_HIDE_FRIEND_COMPOUNDS YES)
+  SET(DOXYGEN_HTML_OUTPUT docs)
+  SET(DOXYGEN_IGNORE_PREFIX _Vis)
+  SET(DOXYGEN_MACRO_EXPANSION YES)
+  SET(DOXYGEN_PREDEFINED "LV_API=" "LV_BEGIN_DECLS=" "LV_END_DECLS=" "__cplusplus")
+  SET(DOXYGEN_REFERENCED_BY_RELATION YES)
+  SET(DOXYGEN_SOURCE_BROWSER YES)
+  SET(DOXYGEN_TEMPLATE_RELATIONS YES)
+  SET(DOXYGEN_TYPEDEF_HIDES_STRUCT YES)
+  SET(DOXYGEN_WARN_IF_UNDOCUMENTED NO)     # TODO: Get rid of this eventually
+  SET(DOXYGEN_WARN_NO_PARAMDOC YES)
+
+  IF(ENABLE_EXAMPLES)
+    SET(DOXYGEN_EXAMPLE_PATH examples)
+    SET(DOXYGEN_EXAMPLE_PATTERNS *.cpp *.hpp *.c *.h)
+  ENDIF()
+
+  DOXYGEN_ADD_DOCS(docs
+    libvisual
+    COMMENT "Generate API documentation.")
+ENDIF()
+
+# Generate pkg-config file
+SET(LV_PKG_CONFIG_NAME   "libvisual-${LV_VERSION_SUFFIX}")
+SET(LV_PKG_CONFIG_LIBS   "-lvisual-${LV_VERSION_SUFFIX} ${CMAKE_THREAD_LIBS_INIT}")
+SET(LV_PKG_CONFIG_CFLAGS "")
+SET(LV_PKG_CONFIG_DEPS   "")
+CONFIGURE_FILE(${PROJECT_SOURCE_DIR}/libvisual.pc.in ${PROJECT_BINARY_DIR}/${LV_PKG_CONFIG_NAME}.pc @ONLY)
+INSTALL(FILES ${PROJECT_BINARY_DIR}/${LV_PKG_CONFIG_NAME}.pc DESTINATION ${CMAKE_INSTALL_LIBDIR}/pkgconfig)
+
+# Generate config headers
+CONFIGURE_FILE(${PROJECT_SOURCE_DIR}/config.h.in ${PROJECT_BINARY_DIR}/config.h)
+CONFIGURE_FILE(${PROJECT_SOURCE_DIR}/libvisual/lvconfig.h.in ${PROJECT_BINARY_DIR}/libvisual/lvconfig.h)
+
+# Build libvisual
+ADD_SUBDIRECTORY(libvisual)
+
+# Uninstallation (script copied from CMake FAQ)
+
+CONFIGURE_FILE(
+  "${PROJECT_SOURCE_DIR}/cmake_uninstall.cmake.in"
+  "${PROJECT_BINARY_DIR}/cmake_uninstall.cmake"
+  @ONLY
+)
+
+ADD_CUSTOM_TARGET(uninstall
+  "${CMAKE_COMMAND}" -P "${PROJECT_BINARY_DIR}/cmake_uninstall.cmake"
+)
+
+# Export target generation/installation
+
+INSTALL(EXPORT libvisual
+  FILE libvisual.cmake
+  NAMESPACE Libvisual::
+  DESTINATION "${LV_CMAKE_EXPORT_DIR}"
+)
+
+INCLUDE(CMakePackageConfigHelpers)
+
+CONFIGURE_PACKAGE_CONFIG_FILE(${CMAKE_CURRENT_SOURCE_DIR}/libvisual-config.cmake.in
+  "${CMAKE_CURRENT_BINARY_DIR}/libvisual-config.cmake"
+  INSTALL_DESTINATION "${LV_CMAKE_EXPORT_DIR}"
+  PATH_VARS LV_PLUGIN_DIR LV_PLUGIN_DATA_DIR LV_PLUGIN_LOCALE_DIR
+  NO_SET_AND_CHECK_MACRO
+  NO_CHECK_REQUIRED_COMPONENTS_MACRO
+)
+
+WRITE_BASIC_PACKAGE_VERSION_FILE("libvisual-config-version.cmake"
+  VERSION "${LV_VERSION}"
+  COMPATIBILITY SameMinorVersion
+)
+
+INSTALL(FILES
+  "${CMAKE_CURRENT_BINARY_DIR}/libvisual-config.cmake"
+  "${CMAKE_CURRENT_BINARY_DIR}/libvisual-config-version.cmake"
+  DESTINATION "${LV_CMAKE_EXPORT_DIR}"
+)
+
+# Packaging
+
+SET(CPACK_PACKAGE_FILE_NAME "${PACKAGE_NAME}-${LV_VERSION_MAJOR}.${LV_VERSION_MINOR}-${LV_VERSION_MICRO}")
+SET(CPACK_PACKAGE_VERSION_MAJOR ${LV_VERSION_MAJOR})
+SET(CPACK_PACKAGE_VERSION_MINOR ${LV_VERSION_MINOR})
+SET(CPACK_PACKAGE_VERSION_PATCH ${LV_VERSION_MICRO})
+SET(CPACK_PACKAGE_VENDOR ${PACKAGE_VENDOR})
+SET(CPACK_PACKAGE_CONTACT ${PACKAGE_CONTACT})
+SET(CPACK_PACKAGE_DESCRIPTION_SUMMARY ${PACKAGE_SUMMARY})
+SET(CPACK_RESOURCE_FILE_LICENSE ${PROJECT_SOURCE_DIR}/COPYING)
+SET(CPACK_RESOURCE_FILE_README  ${PROJECT_SOURCE_DIR}/README)
+
+SET(CPACK_DEBIAN_PACKAGE_NAME "${PACKAGE_NAME}-${LV_VERSION_MAJOR}.${LV_VERSION_MINOR}-${LV_VERSION_MICRO}")
+SET(CPACK_DEBIAN_PACKAGE_VERSION "${LV_VERSION_MAJOR}.${LV_VERSION_MINOR}-${LV_VERSION_MICRO}")
+SET(CPACK_DEBIAN_PACKAGE_MAINTAINER "${PACKAGE_VENDOR} <info@libvisual.org>")
+SET(CPACK_DEBIAN_PACKAGE_SECTION "libs")
+SET(CPACK_DEBIAN_PACKAGE_HOMEPAGE ${PACKAGE_URL})
+SET(CPACK_DEBIAN_PACKAGE_SHLIBDEPS "on")
+SET(CPACK_DEBIAN_PACKAGE_PREDEPENDS "multiarch-support")
+
+SET(CPACK_GENERATOR TGZ TBZ2 DEB)
+SET(CPACK_SOURCE_GENERATOR TGZ TBZ2 DEB)
+
+SET(CPACK_SOURCE_IGNORE_FILES
+  /\\\\.git/
+  /\\\\.gitignore$
+  /_CPack_Packages/
+  /CMakeCache.txt$
+  CMakeFiles/
+  /CPackConfig.cmake$
+  /CPackSourceConfig.cmake$
+  cmake_install.cmake$
+  cmake_uninstall.cmake$
+  Makefile$
+  /install_manifest.txt$
+  \\\\.service$
+  \\\\.desktop$
+  \\\\.pc$
+  \\\\.o$
+  \\\\.a$
+  \\\\.so$
+  \\\\.so\\\\..*$
+  \\\\.mo$
+  \\\\.tar\\\\.gz$
+  \\\\.tar\\\\.bz2$
+  ~$
+)
+
+
+INCLUDE(CPack)

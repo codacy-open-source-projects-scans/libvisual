@@ -1,0 +1,14 @@
+SET(MADSPIN_DATA_DIR ${LV_PLUGIN_DATA_DIR}/actor/actor_madspin)
+
+LV_BUILD_ACTOR_PLUGIN(madspin
+  SOURCES      madspin.c
+  COMPILE_DEFS STAR_DIR="${MADSPIN_DATA_DIR}"
+  LINK_LIBS    OpenGL::GL OpenGL::GLU m
+)
+
+SET(IMAGES
+  star1.bmp
+  star2.bmp
+)
+
+INSTALL(FILES ${IMAGES} DESTINATION ${MADSPIN_DATA_DIR})

@@ -1,0 +1,9 @@
+# Backup files
+*~
+\#*
+
+# Emacs Semantic cache files
+*.cache
+
+# VSCode files
+.vscode

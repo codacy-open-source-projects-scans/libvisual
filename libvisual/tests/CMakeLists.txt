@@ -1,0 +1,16 @@
+INCLUDE(LVBuildTest)
+
+ADD_LIBRARY(test_common STATIC
+  random.cpp
+)
+
+TARGET_INCLUDE_DIRECTORIES(test_common PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+TARGET_LINK_LIBRARIES(test_common PUBLIC libvisual)
+
+ADD_SUBDIRECTORY(audio_test)
+ADD_SUBDIRECTORY(mem_test)
+ADD_SUBDIRECTORY(video_test)
+ADD_SUBDIRECTORY(time_test)
